@@ -1,0 +1,9 @@
+version_info = {
+    "version": "1.0.0",
+    "company_name": "AZZA",
+    "file_description": "Image Viewer",
+    "internal_name": "ImageViewer",
+    "legal_copyright": "© 2024 AZZA. All rights reserved.",
+    "original_filename": "ImageViewer.exe",
+    "product_name": "ImageViewer"
+}
