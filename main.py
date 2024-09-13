@@ -1,11 +1,10 @@
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QFileDialog, QVBoxLayout, QWidget, QHBoxLayout, QScrollArea
+from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QFileDialog, QVBoxLayout, QWidget, QHBoxLayout, QScrollArea, QPushButton
 from PyQt5.QtGui import QPixmap, QImage, QMovie
-from PyQt5.QtCore import Qt, QTimer, QSize, QRectF, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QSize, QSettings, pyqtSignal
 from PIL import Image
 import io
-
 
 class APNGLabel(QLabel):
     def __init__(self, parent=None):
@@ -53,13 +52,14 @@ class APNGLabel(QLabel):
             self.timer.start(int(self.durations[self.current_frame]))
 
     def setScaledPixmap(self):
-        if self.original_pixmap:
+        if self.original_pixmap and not self.original_pixmap.isNull():
             scaled_pixmap = self.original_pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             super().setPixmap(scaled_pixmap)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.setScaledPixmap()
+
 class ThumbnailStrip(QWidget):
     thumbnailClicked = pyqtSignal(int)
 
@@ -72,9 +72,13 @@ class ThumbnailStrip(QWidget):
 
     def add_thumbnail(self, pixmap, index):
         thumbnail = QLabel()
-        scaled_pixmap = pixmap.scaled(QSize(80, 80), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        thumbnail.setPixmap(scaled_pixmap)
-        thumbnail.setFixedSize(80, 80)
+        if not pixmap.isNull():
+            scaled_pixmap = pixmap.scaled(QSize(60, 60), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            thumbnail.setPixmap(scaled_pixmap)
+        else:
+            thumbnail.setText("No Preview")
+        thumbnail.setFixedSize(60, 60)
+        thumbnail.setStyleSheet("QLabel { background-color: #333333; color: white; }")
         thumbnail.mousePressEvent = lambda event, i=index: self.thumbnailClicked.emit(i)
         self.layout.addWidget(thumbnail)
         self.thumbnails.append(thumbnail)
@@ -88,7 +92,7 @@ class ThumbnailStrip(QWidget):
 class ImageViewer(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Img Viewer")
+        self.setWindowTitle("Image Viewer")
         self.setGeometry(100, 100, 800, 600)
 
         self.central_widget = QWidget()
@@ -96,41 +100,57 @@ class ImageViewer(QMainWindow):
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
 
-        self.image_area = QWidget()
-        self.image_layout = QVBoxLayout(self.image_area)
+        self.image_area = QScrollArea()
+        self.image_area.setWidgetResizable(True)
+        self.image_area.setAlignment(Qt.AlignCenter)
+        self.image_area.setStyleSheet("QScrollArea { border: none; background-color: black; }")
+        
         self.label = APNGLabel(self)
         self.label.setAlignment(Qt.AlignCenter)
-        self.image_layout.addWidget(self.label)
+        self.image_area.setWidget(self.label)
 
         self.thumbnail_scroll_area = QScrollArea()
         self.thumbnail_scroll_area.setWidgetResizable(True)
-        self.thumbnail_scroll_area.setFixedHeight(100)
+        self.thumbnail_scroll_area.setFixedHeight(70)
         self.thumbnail_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.thumbnail_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.thumbnail_scroll_area.setStyleSheet("QScrollArea { border: none; background-color: black; }")
+        self.thumbnail_scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #111111; }")
         self.thumbnail_strip = ThumbnailStrip()
         self.thumbnail_strip.thumbnailClicked.connect(self.show_image)
         self.thumbnail_scroll_area.setWidget(self.thumbnail_strip)
 
+        self.button_layout = QHBoxLayout()
+        self.select_folder_button = QPushButton("Select Folder")
+        self.select_folder_button.clicked.connect(self.select_new_folder)
+        self.button_layout.addWidget(self.select_folder_button)
+
         self.main_layout.addWidget(self.image_area, 1)
+        self.main_layout.addLayout(self.button_layout)
         self.main_layout.addWidget(self.thumbnail_scroll_area)
-        self.main_layout.setContentsMargins(0, 0, 0, 10)
+        self.main_layout.setSpacing(5)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
 
         self.current_image_index = 0
         self.image_list = []
         self.current_directory = ""
         self.current_image_path = ""
 
-        self.load_images()
+        self.settings = QSettings("YourCompany", "ImageViewer")
+        self.select_new_folder(self.settings.value("last_directory", ""))
 
-    def load_images(self):
-        self.current_directory = QFileDialog.getExistingDirectory(self, "Select img dir")
-        if self.current_directory:
-            self.image_list = [f for f in os.listdir(self.current_directory)
-                               if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.apng'))]
-            if self.image_list:
-                self.load_thumbnails()
-                self.show_image(0)
+    def select_new_folder(self, default_path=""):
+        directory = QFileDialog.getExistingDirectory(self, "Select Image Directory", default_path)
+        if directory:
+            self.load_images(directory)
+
+    def load_images(self, directory):
+        self.current_directory = directory
+        self.settings.setValue("last_directory", self.current_directory)
+        self.image_list = [f for f in os.listdir(self.current_directory)
+                           if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.apng', '.webm'))]
+        if self.image_list:
+            self.load_thumbnails()
+            self.show_image(0)
 
     def load_thumbnails(self):
         self.thumbnail_strip.clear_thumbnails()
@@ -145,18 +165,25 @@ class ImageViewer(QMainWindow):
             self.current_image_path = os.path.join(self.current_directory, self.image_list[index])
             if self.current_image_path.lower().endswith(('.png', '.apng')):
                 self.label.load_apng(self.current_image_path)
-            elif self.current_image_path.lower().endswith('.gif'):
-                self.show_gif()
+            elif self.current_image_path.lower().endswith(('.gif', '.webm')):
+                self.show_animated_image()
             else:
                 pixmap = QPixmap(self.current_image_path)
-                self.label.original_pixmap = pixmap
-                self.label.setScaledPixmap()
+                if not pixmap.isNull():
+                    self.label.original_pixmap = pixmap
+                    self.label.setScaledPixmap()
+                else:
+                    print(f"Failed to load image: {self.current_image_path}")
+            self.adjustImageSize()
 
-    def show_gif(self):
+    def show_animated_image(self):
         movie = QMovie(self.current_image_path)
-        self.label.setMovie(movie)
-        movie.setScaledSize(self.label.size())
-        movie.start()
+        if movie.isValid():
+            self.label.setMovie(movie)
+            movie.setScaledSize(self.label.size())
+            movie.start()
+        else:
+            print(f"Failed to load animated image: {self.current_image_path}")
 
     def load_next_image(self):
         if len(self.image_list) > 0:
@@ -166,10 +193,18 @@ class ImageViewer(QMainWindow):
         if len(self.image_list) > 0:
             self.show_image((self.current_image_index - 1) % len(self.image_list))
 
+    def scroll_thumbnails(self, direction):
+        scrollbar = self.thumbnail_scroll_area.horizontalScrollBar()
+        scrollbar.setValue(scrollbar.value() + direction * 100)
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Right:
             self.load_next_image()
         elif event.key() == Qt.Key_Left:
+            self.load_previous_image()
+        elif event.key() == Qt.Key_Down:
+            self.load_next_image()
+        elif event.key() == Qt.Key_Up:
             self.load_previous_image()
         elif event.key() == Qt.Key_F:
             if self.isFullScreen():
@@ -178,14 +213,14 @@ class ImageViewer(QMainWindow):
                 self.showFullScreen()
         elif event.key() == Qt.Key_Escape and self.isFullScreen():
             self.showNormal()
+        elif event.key() == Qt.Key_O:
+            self.select_new_folder()
 
     def wheelEvent(self, event):
         if self.thumbnail_scroll_area.underMouse():
-            # 如果滑鼠在縮圖區域，則滾動縮圖列表
             self.thumbnail_scroll_area.horizontalScrollBar().setValue(
                 self.thumbnail_scroll_area.horizontalScrollBar().value() - event.angleDelta().y())
         else:
-            # 否則，切換圖片
             if event.angleDelta().y() < 0:  # down
                 self.load_next_image()
             else:  # up
@@ -193,7 +228,14 @@ class ImageViewer(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.label.setScaledPixmap()
+        self.adjustImageSize()
+
+    def adjustImageSize(self):
+        if self.label.original_pixmap and not self.label.original_pixmap.isNull():
+            available_size = self.image_area.size()
+            scaled_pixmap = self.label.original_pixmap.scaled(available_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.label.setPixmap(scaled_pixmap)
+            self.label.setFixedSize(scaled_pixmap.size())
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
