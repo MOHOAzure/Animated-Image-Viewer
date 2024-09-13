@@ -1,10 +1,11 @@
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QFileDialog, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QFileDialog, QVBoxLayout, QWidget, QHBoxLayout, QScrollArea
 from PyQt5.QtGui import QPixmap, QImage, QMovie
-from PyQt5.QtCore import Qt, QTimer, QSize
+from PyQt5.QtCore import Qt, QTimer, QSize, QRectF, pyqtSignal
 from PIL import Image
 import io
+
 
 class APNGLabel(QLabel):
     def __init__(self, parent=None):
@@ -59,6 +60,30 @@ class APNGLabel(QLabel):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.setScaledPixmap()
+class ThumbnailStrip(QWidget):
+    thumbnailClicked = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(5)
+        self.thumbnails = []
+
+    def add_thumbnail(self, pixmap, index):
+        thumbnail = QLabel()
+        scaled_pixmap = pixmap.scaled(QSize(80, 80), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        thumbnail.setPixmap(scaled_pixmap)
+        thumbnail.setFixedSize(80, 80)
+        thumbnail.mousePressEvent = lambda event, i=index: self.thumbnailClicked.emit(i)
+        self.layout.addWidget(thumbnail)
+        self.thumbnails.append(thumbnail)
+
+    def clear_thumbnails(self):
+        for thumbnail in self.thumbnails:
+            self.layout.removeWidget(thumbnail)
+            thumbnail.deleteLater()
+        self.thumbnails.clear()
 
 class ImageViewer(QMainWindow):
     def __init__(self):
@@ -69,11 +94,27 @@ class ImageViewer(QMainWindow):
         self.central_widget = QWidget()
         self.central_widget.setStyleSheet("background-color: black;")
         self.setCentralWidget(self.central_widget)
-        self.layout = QVBoxLayout(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
 
+        self.image_area = QWidget()
+        self.image_layout = QVBoxLayout(self.image_area)
         self.label = APNGLabel(self)
         self.label.setAlignment(Qt.AlignCenter)
-        self.layout.addWidget(self.label)
+        self.image_layout.addWidget(self.label)
+
+        self.thumbnail_scroll_area = QScrollArea()
+        self.thumbnail_scroll_area.setWidgetResizable(True)
+        self.thumbnail_scroll_area.setFixedHeight(100)
+        self.thumbnail_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.thumbnail_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.thumbnail_scroll_area.setStyleSheet("QScrollArea { border: none; background-color: black; }")
+        self.thumbnail_strip = ThumbnailStrip()
+        self.thumbnail_strip.thumbnailClicked.connect(self.show_image)
+        self.thumbnail_scroll_area.setWidget(self.thumbnail_strip)
+
+        self.main_layout.addWidget(self.image_area, 1)
+        self.main_layout.addWidget(self.thumbnail_scroll_area)
+        self.main_layout.setContentsMargins(0, 0, 0, 10)
 
         self.current_image_index = 0
         self.image_list = []
@@ -88,7 +129,15 @@ class ImageViewer(QMainWindow):
             self.image_list = [f for f in os.listdir(self.current_directory)
                                if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.apng'))]
             if self.image_list:
+                self.load_thumbnails()
                 self.show_image(0)
+
+    def load_thumbnails(self):
+        self.thumbnail_strip.clear_thumbnails()
+        for i, image_name in enumerate(self.image_list):
+            image_path = os.path.join(self.current_directory, image_name)
+            pixmap = QPixmap(image_path)
+            self.thumbnail_strip.add_thumbnail(pixmap, i)
 
     def show_image(self, index):
         if 0 <= index < len(self.image_list):
@@ -131,10 +180,16 @@ class ImageViewer(QMainWindow):
             self.showNormal()
 
     def wheelEvent(self, event):
-        if event.angleDelta().y() < 0:  # down
-            self.load_next_image()
-        else:  # up
-            self.load_previous_image()
+        if self.thumbnail_scroll_area.underMouse():
+            # 如果滑鼠在縮圖區域，則滾動縮圖列表
+            self.thumbnail_scroll_area.horizontalScrollBar().setValue(
+                self.thumbnail_scroll_area.horizontalScrollBar().value() - event.angleDelta().y())
+        else:
+            # 否則，切換圖片
+            if event.angleDelta().y() < 0:  # down
+                self.load_next_image()
+            else:  # up
+                self.load_previous_image()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
