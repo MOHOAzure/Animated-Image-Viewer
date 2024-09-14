@@ -7,9 +7,7 @@ from PyQt5.QtCore import Qt, QTimer, QSize, QSettings, pyqtSignal, QThread, QObj
 from PIL import Image
 import io
 
-
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
 
 class APNGLabel(QLabel):
     def __init__(self, parent=None):
@@ -94,7 +92,6 @@ class ThumbnailStrip(QWidget):
             thumbnail.deleteLater()
         self.thumbnails.clear()
 
-
 class ImageLoader(QObject):
     loaded = pyqtSignal(object)
     error = pyqtSignal(str)
@@ -110,7 +107,6 @@ class ImageLoader(QObject):
         except Exception as e:
             logging.error(f"Error loading image {self.path}: {str(e)}")
             self.error.emit(str(e))
-
 
 class ImageViewer(QMainWindow):
     def __init__(self):
@@ -158,7 +154,6 @@ class ImageViewer(QMainWindow):
         self.current_directory = ""
         self.current_image_path = ""
 
-        
         self.load_timer = QTimer(self)
         self.load_timer.timeout.connect(self.handle_load_timeout)
         self.load_thread = None
@@ -186,9 +181,10 @@ class ImageViewer(QMainWindow):
                     logging.warning(f"Skipping corrupted image {f}: {str(e)}")
         if self.image_list:
             self.load_thumbnails()
-            self.show_image(0)
+            self.show_image(0)  # Always show the first image when loading a new folder
         else:
             self.label.setText("No valid images found in the selected directory")
+            self.label.setScaledPixmap()  # Clear any previous image
 
     def load_thumbnails(self):
         self.thumbnail_strip.clear_thumbnails()
@@ -237,7 +233,6 @@ class ImageViewer(QMainWindow):
         self.load_thread.wait()
         logging.error(f"Image loading timed out: {self.current_image_path}")
         self.label.setText("Image loading timed out")
-
 
     def show_png_image(self):
         try:
