@@ -1,10 +1,15 @@
 import sys
 import os
+import logging
 from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QFileDialog, QVBoxLayout, QWidget, QHBoxLayout, QScrollArea, QPushButton
 from PyQt5.QtGui import QPixmap, QImage, QMovie
-from PyQt5.QtCore import Qt, QTimer, QSize, QSettings, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QSize, QSettings, pyqtSignal, QThread, QObject
 from PIL import Image
 import io
+
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 class APNGLabel(QLabel):
     def __init__(self, parent=None):
@@ -89,6 +94,24 @@ class ThumbnailStrip(QWidget):
             thumbnail.deleteLater()
         self.thumbnails.clear()
 
+
+class ImageLoader(QObject):
+    loaded = pyqtSignal(object)
+    error = pyqtSignal(str)
+
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+
+    def load(self):
+        try:
+            image = Image.open(self.path)
+            self.loaded.emit(image)
+        except Exception as e:
+            logging.error(f"Error loading image {self.path}: {str(e)}")
+            self.error.emit(str(e))
+
+
 class ImageViewer(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -135,6 +158,11 @@ class ImageViewer(QMainWindow):
         self.current_directory = ""
         self.current_image_path = ""
 
+        
+        self.load_timer = QTimer(self)
+        self.load_timer.timeout.connect(self.handle_load_timeout)
+        self.load_thread = None
+
         self.settings = QSettings("AZZA", "ImageViewer")
         self.select_new_folder(self.settings.value("last_directory", ""))
 
@@ -146,11 +174,21 @@ class ImageViewer(QMainWindow):
     def load_images(self, directory):
         self.current_directory = directory
         self.settings.setValue("last_directory", self.current_directory)
-        self.image_list = [f for f in os.listdir(self.current_directory)
-                           if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.apng'))]
+        self.image_list = []
+        for f in os.listdir(self.current_directory):
+            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.apng')):
+                try:
+                    # Attempt to open the image to verify it's not corrupted
+                    with Image.open(os.path.join(self.current_directory, f)) as img:
+                        img.verify()
+                    self.image_list.append(f)
+                except Exception as e:
+                    logging.warning(f"Skipping corrupted image {f}: {str(e)}")
         if self.image_list:
             self.load_thumbnails()
             self.show_image(0)
+        else:
+            self.label.setText("No valid images found in the selected directory")
 
     def load_thumbnails(self):
         self.thumbnail_strip.clear_thumbnails()
@@ -164,14 +202,42 @@ class ImageViewer(QMainWindow):
             self.current_image_index = index
             self.current_image_path = os.path.join(self.current_directory, self.image_list[index])
             
-            if self.current_image_path.lower().endswith(('.png', '.apng')):
-                self.show_png_image()
-            elif self.current_image_path.lower().endswith(('.gif')):
-                self.show_animated_image()
-            else:
-                self.show_static_image()
+            self.load_timer.start(5000)  # 5 second timeout
+            self.load_thread = QThread()
+            self.image_loader = ImageLoader(self.current_image_path)
+            self.image_loader.moveToThread(self.load_thread)
+            self.load_thread.started.connect(self.image_loader.load)
+            self.image_loader.loaded.connect(self.on_image_loaded)
+            self.image_loader.error.connect(self.on_image_error)
+            self.load_thread.start()
 
-            self.adjustImageSize()
+    def on_image_loaded(self, image):
+        self.load_timer.stop()
+        self.load_thread.quit()
+        self.load_thread.wait()
+
+        if 'duration' in image.info:  # This is an APNG
+            self.label.load_apng(self.current_image_path)
+        elif getattr(image, "is_animated", False):  # This is a GIF
+            self.show_animated_image()
+        else:  # This is a static image
+            self.show_static_image()
+
+        self.adjustImageSize()
+
+    def on_image_error(self, error):
+        self.load_timer.stop()
+        self.load_thread.quit()
+        self.load_thread.wait()
+        logging.error(f"Failed to load image: {error}")
+        self.label.setText(f"Error loading image: {error}")
+
+    def handle_load_timeout(self):
+        self.load_thread.terminate()
+        self.load_thread.wait()
+        logging.error(f"Image loading timed out: {self.current_image_path}")
+        self.label.setText("Image loading timed out")
+
 
     def show_png_image(self):
         try:
