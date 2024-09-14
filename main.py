@@ -135,7 +135,7 @@ class ImageViewer(QMainWindow):
         self.current_directory = ""
         self.current_image_path = ""
 
-        self.settings = QSettings("YourCompany", "ImageViewer")
+        self.settings = QSettings("AZZA", "ImageViewer")
         self.select_new_folder(self.settings.value("last_directory", ""))
 
     def select_new_folder(self, default_path=""):
@@ -147,7 +147,7 @@ class ImageViewer(QMainWindow):
         self.current_directory = directory
         self.settings.setValue("last_directory", self.current_directory)
         self.image_list = [f for f in os.listdir(self.current_directory)
-                           if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.apng', '.webm'))]
+                           if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.apng'))]
         if self.image_list:
             self.load_thumbnails()
             self.show_image(0)
@@ -163,18 +163,34 @@ class ImageViewer(QMainWindow):
         if 0 <= index < len(self.image_list):
             self.current_image_index = index
             self.current_image_path = os.path.join(self.current_directory, self.image_list[index])
+            
             if self.current_image_path.lower().endswith(('.png', '.apng')):
-                self.label.load_apng(self.current_image_path)
-            elif self.current_image_path.lower().endswith(('.gif', '.webm')):
+                self.show_png_image()
+            elif self.current_image_path.lower().endswith(('.gif')):
                 self.show_animated_image()
             else:
-                pixmap = QPixmap(self.current_image_path)
-                if not pixmap.isNull():
-                    self.label.original_pixmap = pixmap
-                    self.label.setScaledPixmap()
-                else:
-                    print(f"Failed to load image: {self.current_image_path}")
+                self.show_static_image()
+
             self.adjustImageSize()
+
+    def show_png_image(self):
+        try:
+            image = Image.open(self.current_image_path)
+            if 'duration' in image.info:  # This is an APNG
+                self.label.load_apng(self.current_image_path)
+            else:  # This is a static PNG
+                self.show_static_image()
+        except Exception as e:
+            print(f"Error loading PNG: {e}")
+            self.show_static_image()  # Fallback to static image loading
+
+    def show_static_image(self):
+        pixmap = QPixmap(self.current_image_path)
+        if not pixmap.isNull():
+            self.label.original_pixmap = pixmap
+            self.label.setScaledPixmap()
+        else:
+            print(f"Failed to load image: {self.current_image_path}")
 
     def show_animated_image(self):
         movie = QMovie(self.current_image_path)
@@ -199,9 +215,9 @@ class ImageViewer(QMainWindow):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Right:
-            self.load_next_image()
+            self.scroll_thumbnails(1)
         elif event.key() == Qt.Key_Left:
-            self.load_previous_image()
+            self.scroll_thumbnails(-1)
         elif event.key() == Qt.Key_Down:
             self.load_next_image()
         elif event.key() == Qt.Key_Up:
