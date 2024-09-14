@@ -214,13 +214,13 @@ class ImageViewer(QMainWindow):
         scrollbar.setValue(scrollbar.value() + direction * 100)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Right:
+        if event.key() == Qt.Key_6:
             self.scroll_thumbnails(1)
-        elif event.key() == Qt.Key_Left:
+        elif event.key() == Qt.Key_4:
             self.scroll_thumbnails(-1)
-        elif event.key() == Qt.Key_Down:
+        elif event.key() == Qt.Key_2:
             self.load_next_image()
-        elif event.key() == Qt.Key_Up:
+        elif event.key() == Qt.Key_8:
             self.load_previous_image()
         elif event.key() == Qt.Key_F:
             if self.isFullScreen():
